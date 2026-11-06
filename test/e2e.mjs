@@ -105,3 +105,12 @@ must(t.status === 400 && t.j.error === "invalid_grant", "refresh non valido → 
 r = await fetch(`${B}/authorize`, { method: "POST", body: form({ mode: "token", token: "tok999" }), redirect: "manual" });
 must(r.status === 200 && (await r.text()).includes("err"), "token non valido rifiutato");
 log("\nTUTTI I TEST PASSATI");
+
+// 8. icone
+must(init.serverInfo.icons?.[0]?.src?.startsWith("data:image/svg+xml"), "serverInfo.icons presente");
+for (const p of ["/favicon.ico", "/icon.svg", "/apple-icon.png"]) {
+  const x = await fetch(B + p);
+  must(x.status === 200, `${p} servito (${x.headers.get("content-type")})`);
+}
+must((await (await fetch(B + "/")).text()).includes('rel="icon"'), "link icon nella home");
+log("ICONE OK");

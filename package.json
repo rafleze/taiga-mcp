@@ -1,6 +1,6 @@
 {
   "name": "taiga-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Server MCP remoto per collegare Claude (e altri client MCP) a Taiga, self-hosted o taiga.io",
   "scripts": {
     "dev": "next dev",

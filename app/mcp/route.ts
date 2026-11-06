@@ -1,6 +1,7 @@
 // Endpoint MCP (Streamable HTTP). Richiede un access token emesso da /token.
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import { ICON_DATA_URI } from "@/lib/icon";
 import { unseal } from "@/lib/seal";
 import { registerTools } from "@/lib/tools";
 import type { TaigaSession } from "@/lib/taiga";
@@ -10,7 +11,13 @@ const handler = createMcpHandler(
     registerTools(server);
   },
   {
-    serverInfo: { name: "taiga-mcp", version: "1.0.0" },
+    serverInfo: {
+      name: "taiga-mcp",
+      title: "Taiga",
+      version: "1.1.0",
+      websiteUrl: "https://github.com/rafleze/taiga-mcp",
+      icons: [{ src: ICON_DATA_URI, mimeType: "image/svg+xml", sizes: ["any"] }],
+    } as { name: string; version: string },
     instructions:
       "Strumenti per Taiga (gestione progetti agile). Gli elementi si indicano con lo slug del progetto e il #ref visibile in Taiga. " +
       "Se non conosci il progetto, chiama prima taiga_list_projects e taiga_get_project per stati, membri e sprint. " +

@@ -13,6 +13,8 @@ export function GET(req: Request) {
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
     scopes_supported: ["taiga"],
+    logo_uri: `${o}/icon.svg`,
+    service_documentation: "https://github.com/rafleze/taiga-mcp",
   });
 }
 
