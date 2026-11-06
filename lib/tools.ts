@@ -136,12 +136,27 @@ export function registerTools(server: McpServer) {
       user_story: ref.optional().describe("(solo task) task di questa user story"),
       text: z.string().optional().describe("filtra per testo nel titolo"),
       only_open: z.boolean().optional().describe("esclude gli elementi chiusi"),
+      closed_since: z.string().optional().describe("YYYY-MM-DD: solo elementi chiusi da questa data in poi (data di chiusura)"),
+      closed_before: z.string().optional().describe("YYYY-MM-DD: solo elementi chiusi entro questa data"),
+      modified_since: z.string().optional().describe("YYYY-MM-DD: solo elementi modificati da questa data"),
+      created_since: z.string().optional().describe("YYYY-MM-DD: solo elementi creati da questa data"),
       limit: z.number().int().positive().max(500).optional().describe("default 100"),
     },
     READ,
     async (t, a) => {
       const pid = await t.projectId(a.project);
       const params: Obj = { project: pid };
+      const date = (v: string | undefined, name: string) => {
+        if (v === undefined) return undefined;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new TaigaError(`${name} deve essere nel formato YYYY-MM-DD`);
+        return v;
+      };
+      // le task usano finished_date, le altre entità finish_date
+      const fin = a.kind === "task" ? "finished_date" : "finish_date";
+      if (a.closed_since) params[`${fin}__gte`] = date(a.closed_since, "closed_since");
+      if (a.closed_before) params[`${fin}__lte`] = `${date(a.closed_before, "closed_before")}T23:59:59`;
+      if (a.modified_since) params.modified_date__gte = date(a.modified_since, "modified_since");
+      if (a.created_since) params.created_date__gte = date(a.created_since, "created_since");
       if (a.status) params.status = await t.statusId(a.kind, pid, a.status);
       if (a.assigned_to) params.assigned_to = await t.userId(pid, a.assigned_to);
       if (a.sprint) params.milestone = (await t.sprintId(pid, a.sprint)) ?? "null";
@@ -155,9 +170,16 @@ export function registerTools(server: McpServer) {
         if (f.length) items = f;
       }
       if (a.only_open) items = items.filter((i) => !i.is_closed);
+      // filtro lato client di sicurezza, nel caso l'istanza ignori i filtri per data
+      const d = (x: unknown) => (typeof x === "string" ? x.slice(0, 10) : "");
+      if (a.closed_since) items = items.filter((i) => i.is_closed && d(i.finish_date ?? i.finished_date) >= a.closed_since!);
+      if (a.closed_before) items = items.filter((i) => i.is_closed && d(i.finish_date ?? i.finished_date) <= a.closed_before!);
+      if (a.modified_since) items = items.filter((i) => d(i.modified_date) >= a.modified_since!);
+      if (a.created_since) items = items.filter((i) => d(i.created_date) >= a.created_since!);
       const total = items.length;
       items = items.slice(0, a.limit ?? 100);
-      return { total, shown: items.length, items: items.map(summarize) };
+      const slug = (await t.project(pid)).slug;
+      return { total, shown: items.length, items: items.map((i) => ({ ...summarize(i), url: t.link(a.kind, slug, i.ref) })) };
     },
   );
 

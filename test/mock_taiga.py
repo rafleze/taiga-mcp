@@ -22,6 +22,10 @@ EXPIRE_NEXT = {"v": True}
 
 def deco(o, kind):
     st = {s["id"]: s for s in STATUSES}[o["status"]]
+    o.setdefault("created_date", "2026-11-01T09:00:00Z")
+    o.setdefault("modified_date", o["created_date"])
+    if st["is_closed"] and not o.get("finish_date"):
+        o["finish_date"] = "2026-11-05T10:00:00Z"
     o = dict(o, status_extra_info={"name": st["name"]}, is_closed=st["is_closed"])
     m = {x["user"]: x for x in MEMBERS}.get(o.get("assigned_to"))
     o["assigned_to_extra_info"] = {"full_name_display": m["full_name"]} if m else None

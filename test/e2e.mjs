@@ -92,6 +92,14 @@ must(c.j?.id === 5, "taiga_api passthrough");
 c = await call("taiga_api", { method: "GET", path: "http://evil/x" });
 must(c.err, "taiga_api rifiuta URL assoluti");
 
+c = await call("taiga_update_item", { kind: "task", project: "growth", ref: 61, status: "Done" });
+c = await call("taiga_list_items", { kind: "task", project: "growth", closed_since: "2026-11-01" });
+must(c.j?.total === 1 && c.j.items[0].closed_on === "2026-11-05" && c.j.items[0].url.includes("/task/"), "list_items closed_since + date + url");
+c = await call("taiga_list_items", { kind: "task", project: "growth", closed_since: "2026-12-01" });
+must(c.j?.total === 0, "closed_since futuro → nessun risultato");
+c = await call("taiga_list_items", { kind: "task", project: "growth", closed_since: "05/11/2026" });
+must(c.err, "formato data non valido rifiutato");
+
 // 6. refresh
 t = await tok({ grant_type: "refresh_token", refresh_token: t.j.refresh_token, client_id: reg.client_id });
 must(t.status === 200 && t.j.access_token, "refresh token (sessione Taiga rinnovata)");

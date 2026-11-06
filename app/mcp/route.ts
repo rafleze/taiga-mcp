@@ -14,7 +14,7 @@ const handler = createMcpHandler(
     serverInfo: {
       name: "taiga-mcp",
       title: "Taiga",
-      version: "1.1.0",
+      version: "1.2.0",
       websiteUrl: "https://github.com/rafleze/taiga-mcp",
       icons: [{ src: ICON_DATA_URI, mimeType: "image/svg+xml", sizes: ["any"] }],
     } as { name: string; version: string },

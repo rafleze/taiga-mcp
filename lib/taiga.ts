@@ -242,5 +242,10 @@ export function summarize(o: Obj): Obj {
   if (o.is_blocked) out.blocked = o.blocked_note || true;
   if (o.due_date) out.due_date = o.due_date;
   if (o.is_closed !== undefined) out.closed = o.is_closed;
+  if (Array.isArray(o.epics) && o.epics.length) out.epics = o.epics.map((e: Obj) => `#${e.ref} ${e.subject}`);
+  const day = (d: unknown) => (typeof d === "string" ? d.slice(0, 10) : undefined);
+  if (o.created_date) out.created_on = day(o.created_date);
+  if (o.modified_date) out.modified_on = day(o.modified_date);
+  if (o.finish_date || o.finished_date) out.closed_on = day(o.finish_date ?? o.finished_date);
   return out;
 }
