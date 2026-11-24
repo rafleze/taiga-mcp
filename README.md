@@ -39,6 +39,7 @@ Items are referenced the way people see them in Taiga: project slug + `#ref`. St
 | `TAIGA_LOCKED_URL` | no | Restrict the server to one instance (company deployment) |
 | `TAIGA_AUTH_MODES` | no | Sign-in methods offered: `password`, `ldap`, `token` (default `password,token`) |
 | `PUBLIC_URL` | no | Public base URL, if it can't be derived from requests |
+| `ALLOWED_REDIRECT_HOSTS` | no | Comma-separated hosts (e.g. `claude.ai,claude.com`). When set, `https` redirect URIs are accepted only on these hosts; loopback redirects (Claude Code) stay allowed. Exact match, no wildcards or ports. |
 | `ALLOW_INSECURE_URLS` | no | `1` allows `http://` and private-network instances. **Testing only.** |
 
 ### Sign-in methods
@@ -58,15 +59,28 @@ Claude Code: `claude mcp add --transport http taiga https://<your-project>.verce
 ## How it works
 
 - OAuth 2.1 authorization server built in: Dynamic Client Registration, PKCE S256, refresh-token rotation. Compatible with the [Claude connector requirements](https://claude.com/docs/connectors/building/authentication).
-- `client_id`, authorization codes, access tokens (1 h) and refresh tokens (90 days) are AES-256-GCM sealed with `TOKEN_SECRET`. No storage.
+- `client_id`, authorization codes, access tokens (1 h) and refresh tokens (30 days) are AES-256-GCM sealed with `TOKEN_SECRET`. No storage.
 - The Taiga password is used once, to get a Taiga session, and is never stored. On refresh the server renews the Taiga session through `auth/refresh`.
 - Taiga is called from the server, so your instance must be reachable from the internet. VPN-only instances need a self-hosted deployment inside the network.
 
 ### Security notes
 
 - Every user's access is limited to what their Taiga account can do.
-- Instances on `http://` or private/loopback addresses are rejected (basic SSRF protection). `taiga_api` accepts only relative paths on the user's own instance.
-- The design is stateless, so codes can't be revoked server-side before they expire (2 minutes, bound to client + PKCE). Refresh tokens can't be revoked individually either. Rotating `TOKEN_SECRET` revokes everything.
+- The Taiga password is forwarded once to Taiga and is never stored or logged. The sealed tokens contain the Taiga session (auth token and refresh token, or the pasted token), so `TOKEN_SECRET` must stay secret.
+- SSRF protection: only `https://` instances are accepted, and before every request to Taiga the host is resolved and refused if any of its addresses is private, loopback, link-local, CGNAT or reserved (IPv4-mapped IPv6 included). Redirects are not followed. A DNS answer that changes between the check and the connection is not covered, so deployments inside a private network should also set `TAIGA_LOCKED_URL`.
+- `taiga_api` only reaches paths under the API of the user's own instance. Absolute URLs, `//`, backslashes, whitespace and `..` (plain or percent-encoded) are refused.
+- Refresh tokens last 30 days and require the `client_id` they were issued to. Each refresh issues a new one.
+- The design is stateless, so codes can't be revoked server-side before they expire (2 minutes, bound to client + PKCE), and refresh tokens can't be revoked individually: after rotation the previous one stays valid until it expires. Rotating `TOKEN_SECRET` revokes everything.
+- Client registration is open, as MCP clients require. Anyone can register a client name and a redirect URI and send a user a link to the login page, so the page shows the host the user will return to. Set `ALLOWED_REDIRECT_HOSTS` to rule this out.
+- There is no built-in rate limiting (no storage to count on). Put it in front of the server, see below.
+- Content read from Taiga (descriptions, comments) is written by other people and reaches the model as is. Keep human confirmation enabled in your MCP client for write and delete tools.
+
+### Hardening a deployment
+
+- **Rate limiting.** In Vercel: project → **Firewall** → add a rate-limit rule for `POST /authorize` and one for `POST /token`, keyed by IP (for example 10 requests per minute on `/authorize`, 60 on `/token`), action *deny* or *challenge*. Without it, `/authorize` can be used to guess passwords against any Taiga instance. On other hosts use the reverse proxy (nginx `limit_req`, Cloudflare).
+- **Company deployments.** Set `TAIGA_LOCKED_URL` so the server only talks to your instance, and `ALLOWED_REDIRECT_HOSTS` with the hosts of the MCP clients you use (for Claude: `claude.ai,claude.com`). The restriction also applies to clients registered before it was set. Set `PUBLIC_URL` so the OAuth metadata never depends on request headers.
+- **Emergency revocation.** If a token may have leaked, change `TOKEN_SECRET` and redeploy: every client registration, code, access token and refresh token stops working and users sign in again. Users should also change their Taiga password, which is the only way to end the Taiga session itself.
+- Never set `ALLOW_INSECURE_URLS` in production: it turns the SSRF protection off.
 
 ## Development
 

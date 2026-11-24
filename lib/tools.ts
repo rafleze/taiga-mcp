@@ -374,8 +374,13 @@ export function registerTools(server: McpServer) {
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     async (t, a) => {
-      const path = a.path.replace(/^\/?(api\/v1\/)?/, "");
-      if (/^https?:|\.\./.test(path)) throw new TaigaError("Path non valido");
+      // Relative paths on the user's own instance only: no scheme, no "//", no traversal
+      // (plain, percent-encoded or double-encoded), no backslashes, no whitespace in the path, no control chars.
+      const raw = a.path.trim();
+      const pathPart = raw.split(/[?#]/)[0]; // the query string may carry free text; use `params` for it when possible
+      if (raw.startsWith("//") || /[\x00-\x1f\x7f]/.test(raw) || /[\\\s]|\.\.|%(25)*(2e|2f|5c)/i.test(pathPart)) throw new TaigaError("Path non valido");
+      const path = raw.replace(/^\/?(api\/v1\/)?/, "");
+      if (/^\/|^[a-z][a-z0-9+.-]*:/i.test(path)) throw new TaigaError("Path non valido");
       return (await t.req(a.method, path, a.body, a.params)) ?? { ok: true };
     },
   );

@@ -1,5 +1,6 @@
 // Client minimale per l'API REST di Taiga v1 (self-hosted o taiga.io).
 import { allowInsecure, lockedUrl, type AuthMode } from "./config";
+import { isPrivateHost, resolvesToPublic } from "./net";
 
 export class TaigaError extends Error {
   constructor(message: string, public status?: number, public detail?: unknown) {
@@ -40,7 +41,7 @@ export function normalizeInstance(input: string): { api: string; web: string } {
   }
   if (!allowInsecure()) {
     if (u.protocol !== "https:") throw new TaigaError("Serve un indirizzo https://");
-    if (isPrivateHost(host)) throw new TaigaError("Indirizzi locali o di rete privata non sono raggiungibili da questo server");
+    if (isPrivateHost(host)) throw new TaigaError(PRIVATE_MSG);
   }
   let path = u.pathname.replace(/\/+$/, "");
   path = path.replace(/\/api\/v1$/, "");
@@ -50,16 +51,6 @@ export function normalizeInstance(input: string): { api: string; web: string } {
   return { api: `${web}/api/v1`, web };
 }
 
-function isPrivateHost(host: string): boolean {
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return true;
-  const h = host.replace(/^\[|\]$/g, "");
-  if (/^(127\.|10\.|0\.|169\.254\.|192\.168\.)/.test(h)) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
-  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h)) return true;
-  if (h === "::1" || /^f[cd][0-9a-f]{2}:/i.test(h) || /^fe80:/i.test(h)) return true;
-  return false;
-}
-
 export function checkLocked(api: string) {
   const locked = lockedUrl();
   if (locked && normalizeInstance(locked).api !== api) {
@@ -67,17 +58,27 @@ export function checkLocked(api: string) {
   }
 }
 
+const PRIVATE_MSG = "Indirizzi locali o di rete privata non sono raggiungibili da questo server";
+
 async function call(api: string, method: string, path: string, opts: { token?: string; body?: unknown; params?: Record<string, unknown> } = {}) {
-  let url = path.startsWith("http") ? path : `${api}/${path.replace(/^\/+/, "")}`;
+  // The path is always relative to the instance API: never let it become another URL
+  const base = new URL(`${api}/`);
+  let target: URL;
+  try {
+    target = new URL(`${api}/${path.replace(/^\/+/, "")}`);
+  } catch {
+    throw new TaigaError("Path non valido");
+  }
+  if (target.origin !== base.origin || !target.pathname.startsWith(base.pathname)) throw new TaigaError("Path non valido");
   if (opts.params) {
-    const qs = new URLSearchParams();
     for (const [k, v] of Object.entries(opts.params)) {
       if (v === undefined || v === null || v === "") continue;
-      qs.append(k, String(v));
+      target.searchParams.append(k, String(v));
     }
-    const s = qs.toString();
-    if (s) url += (url.includes("?") ? "&" : "?") + s;
   }
+  // SSRF: the host must resolve only to public addresses, checked before every request
+  if (!allowInsecure() && !(await resolvesToPublic(target.hostname))) throw new TaigaError(PRIVATE_MSG);
+  const url = target.toString();
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
