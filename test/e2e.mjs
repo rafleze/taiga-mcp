@@ -16,6 +16,12 @@ must(asm.registration_endpoint && asm.code_challenge_methods_supported.includes(
 const cb = "https://claude.ai/api/mcp/auth_callback";
 const reg = await (await fetch(asm.registration_endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_name: "Claude", redirect_uris: [cb] }) })).json();
 must(reg.client_id?.startsWith("tg_client_"), "registrazione client");
+let rr = await fetch(asm.registration_endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_name: "Claude", redirect_uris: ["https://evil.example/cb"] }) });
+must(rr.status === 400 && (await rr.json()).error === "invalid_redirect_uri", "registrazione con redirect_uri su host non ammesso rifiutata");
+rr = await fetch(asm.registration_endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ redirect_uris: [cb, "https://evil.example/cb"] }) });
+must(rr.status === 400, "registrazione mista (host ammesso + non ammesso) rifiutata");
+rr = await fetch(asm.registration_endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ redirect_uris: ["http://localhost:53412/callback", "http://127.0.0.1/cb"] }) });
+must(rr.status === 201, "registrazione con redirect loopback ancora ammessa");
 
 // 3. authorize
 const verifier = randomBytes(40).toString("base64url");
@@ -91,6 +97,14 @@ c = await call("taiga_api", { method: "GET", path: "/api/v1/users/me" });
 must(c.j?.id === 5, "taiga_api passthrough");
 c = await call("taiga_api", { method: "GET", path: "http://evil/x" });
 must(c.err, "taiga_api rifiuta URL assoluti");
+for (const bad of ["http\t://127.0.0.1:8765/api/v1/users/me", "https\n://evil.example/x", "%2e%2e/%2e%2e/admin", ".%2E/admin", "..%2f..%2fadmin", "%2e%2e%2fadmin", "%252e%252e/admin", "users%5c..%5cadmin", "..\\admin", "users\\me", "//evil.example/x", "/api/v1//evil.example/x", "../admin"]) {
+  c = await call("taiga_api", { method: "GET", path: bad });
+  must(c.err && c.text.includes("Path non valido"), `taiga_api rifiuta ${JSON.stringify(bad)}`);
+}
+c = await call("taiga_api", { method: "GET", path: "users/me?q=a b..c" });
+must(c.j?.id === 5, "taiga_api: testo libero nella query ammesso");
+c = await call("taiga_api", { method: "GET", path: "users/me" });
+must(c.j?.id === 5, "taiga_api con path relativo semplice funziona ancora");
 
 c = await call("taiga_update_item", { kind: "task", project: "growth", ref: 61, status: "Done" });
 c = await call("taiga_list_items", { kind: "task", project: "growth", closed_since: "2026-11-01" });
@@ -101,6 +115,10 @@ c = await call("taiga_list_items", { kind: "task", project: "growth", closed_sin
 must(c.err, "formato data non valido rifiutato");
 
 // 6. refresh
+let noClient = await tok({ grant_type: "refresh_token", refresh_token: t.j.refresh_token });
+must(noClient.status === 400 && noClient.j.error === "invalid_request", "refresh senza client_id rifiutato");
+noClient = await tok({ grant_type: "refresh_token", refresh_token: t.j.refresh_token, client_id: "tg_client_" + "x".repeat(40) });
+must(noClient.status === 400 && noClient.j.error === "invalid_grant", "refresh con client_id di un altro client rifiutato");
 t = await tok({ grant_type: "refresh_token", refresh_token: t.j.refresh_token, client_id: reg.client_id });
 must(t.status === 200 && t.j.access_token, "refresh token (sessione Taiga rinnovata)");
 access = t.j.access_token;
@@ -112,9 +130,18 @@ must(t.status === 400 && t.j.error === "invalid_grant", "refresh non valido → 
 // 7. modalità token
 r = await fetch(`${B}/authorize`, { method: "POST", body: form({ mode: "token", token: "tok999" }), redirect: "manual" });
 must(r.status === 200 && (await r.text()).includes("err"), "token non valido rifiutato");
+
+// 8. protezione SSRF (seconda istanza, senza ALLOW_INSECURE_URLS)
+const S = "http://localhost:3001";
+for (const instance of ["https://[::ffff:127.0.0.1]", "https://[::]", "https://[::1]", "https://[::ffff:169.254.169.254]", "https://[64:ff9b::7f00:1]", "https://[::ffff:0:127.0.0.1]", "https://localhost.", "https://127.0.0.1", "https://10.0.0.5", "https://100.64.0.1", "https://169.254.169.254", "https://localtest.me", "https://x.127.0.0.1.nip.io"]) {
+  r = await fetch(`${S}/authorize`, { method: "POST", body: form({ instance, password: "segreta" }), redirect: "manual" });
+  must(r.status === 200 && (await r.text()).includes("rete privata"), `SSRF: ${instance} rifiutato`);
+}
+r = await fetch(`${S}/authorize`, { method: "POST", body: form({ password: "segreta" }), redirect: "manual" });
+must(r.status === 200 && (await r.text()).includes("Serve un indirizzo https"), "SSRF: http:// rifiutato senza ALLOW_INSECURE_URLS");
 log("\nTUTTI I TEST PASSATI");
 
-// 8. icone
+// 9. icone
 must(init.serverInfo.icons?.[0]?.src?.startsWith("data:image/svg+xml"), "serverInfo.icons presente");
 for (const p of ["/favicon.ico", "/icon.svg", "/apple-icon.png"]) {
   const x = await fetch(B + p);

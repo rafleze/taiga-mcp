@@ -41,7 +41,8 @@ export async function POST(req: Request) {
   if (p.grant_type === "refresh_token") {
     const rt = unseal<{ c: string; s: TaigaSession }>("refresh", p.refresh_token);
     if (!rt) return oauthError("invalid_grant", "Refresh token non valido o scaduto");
-    if (p.client_id && rt.c !== clientTail) return oauthError("invalid_grant", "Refresh token emesso per un altro client");
+    if (!p.client_id) return oauthError("invalid_request", "client_id obbligatorio");
+    if (rt.c !== clientTail) return oauthError("invalid_grant", "Refresh token emesso per un altro client");
     try {
       const s = await refreshSession(rt.s);
       return issue(s, rt.c);
